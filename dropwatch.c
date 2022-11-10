@@ -117,7 +117,7 @@ void handle_event(void *ctx, int cpu, void *data, __u32 data_sz)
 	tm = localtime(&t);
 	strftime(ts, sizeof(ts), "%H:%M:%S", tm);
 
-	printf("%-16s %-16s %-8lld %-12s:%-5d -> %-12s:%-5d %-12s", ts, e->comm, e->pid, saddr, e->sport, daddr, e->dport, DROP_REASONS[e->reason]);
+	printf("%-16s %-16s %-8lld %-12s:%-5d -> %-12s:%-5d %-12s", ts, e->comm, e->pid, saddr, ntohs(e->sport), daddr, ntohs(e->dport), DROP_REASONS[e->reason]);
 	putchar('\n');
 }
 
