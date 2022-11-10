@@ -29,8 +29,9 @@ spec:
                 - linux
       containers:
       - command:
-        - /dropwatch
-        image: feisky/dropwatch
+        - /usr/local/bin/bpftrace
+        - /programs/tcpdrop.bt
+        image: feisky/dropwatch:bpftrace
         imagePullPolicy: Always
         name: dropwatch
         resources:
