@@ -31,5 +31,5 @@ docker run -it --rm -v /usr/src:/usr/src:ro -v /lib/modules/:/lib/modules:ro -v 
 ## Run in Kubernetes
 
 ```sh
-kubectl apply -f kubernetes.yaml
+kubectl apply -f kubernetes/
 ```
