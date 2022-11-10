@@ -21,9 +21,15 @@ sudo apt-get install -y make clang llvm libelf-dev linux-tools-$(uname -r)
 sudo yum install -y make clang llvm elfutils-libelf-devel bpftool
 ```
 
-## Build and Run
+## Build and Run Locally
 
 ```
 docker build -t dropwatch .
 docker run -it --rm -v /usr/src:/usr/src:ro -v /lib/modules/:/lib/modules:ro -v /sys/:/sys/:rw --net=host --pid=host --privileged dropwatch
+```
+
+## Run in Kubernetes
+
+```sh
+kubectl apply -f kubernetes.yaml
 ```
