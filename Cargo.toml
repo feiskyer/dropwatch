@@ -1,0 +1,19 @@
+[package]
+name = "dropwatch"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+libbpf-rs = "0.18"
+libc = "0.2"
+plain = "0.2"
+ctrlc = "3.1"
+nix = { version = "0.24", default-features = false, features = ["net", "user"] }
+clap = { version = "3.1", default-features = false, features = ["std", "derive"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "macros"]}
+
+[build-dependencies]
+libbpf-cargo = "0.12"
