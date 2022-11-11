@@ -3,6 +3,7 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include <bpf/bpf_endian.h>
 #include "dropwatch.h"
 
 // extern __u32 LINUX_KERNEL_VERSION __kconfig;
@@ -49,6 +50,7 @@ int trace_skb(struct trace_event_raw_kfree_skb *ctx)
     bpf_get_current_comm(&event.comm, sizeof(event.comm));
     bpf_probe_read(&event.sport, sizeof(event.sport), &sk->__sk_common.skc_num);
     bpf_probe_read(&event.dport, sizeof(event.dport), &sk->__sk_common.skc_dport);
+    event.dport = bpf_ntohs(event.dport);
 
     if (event.family == AF_INET)
     {
@@ -57,8 +59,8 @@ int trace_skb(struct trace_event_raw_kfree_skb *ctx)
     }
     else
     {
-        bpf_probe_read(&event.daddr6, sizeof(event.daddr6), &sk->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
-        bpf_probe_read(&event.saddr6, sizeof(event.saddr6), &sk->__sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
+        bpf_probe_read(&event.daddr, sizeof(event.daddr), &sk->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
+        bpf_probe_read(&event.saddr, sizeof(event.saddr), &sk->__sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
     }
 
     // submit to perf event
