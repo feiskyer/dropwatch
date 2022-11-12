@@ -10,6 +10,21 @@
 #define MAX_DROP_REASON 256
 static char DROP_REASONS[MAX_DROP_REASON][256] = {};
 
+static char *get_tcp_flags(__u8 flags)
+{
+	static char buf[9];
+	buf[0] = flags & TCPHDR_FIN ? 'F' : '.';
+	buf[1] = flags & TCPHDR_SYN ? 'S' : '.';
+	buf[2] = flags & TCPHDR_RST ? 'R' : '.';
+	buf[3] = flags & TCPHDR_PSH ? 'P' : '.';
+	buf[4] = flags & TCPHDR_ACK ? 'A' : '.';
+	buf[5] = flags & TCPHDR_URG ? 'U' : '.';
+	buf[6] = flags & TCPHDR_ECE ? 'E' : '.';
+	buf[7] = flags & TCPHDR_CWR ? 'C' : '.';
+	buf[8] = '\0';
+	return buf;
+}
+
 // Parse the drop reason from the kernel. This is required because the reason number
 // is different in different kernel versions.
 static int parse_drop_reasons()
@@ -22,7 +37,7 @@ static int parse_drop_reasons()
 	}
 
 	// Parse the file to get the drop reasons.
-	// Sample contenct: ..., __print_symbolic(REC->reason, { 0, "NOT_SPECIFIED" }, { 1, "NO_SOCKET" },...
+	// Sample contents: ..., __print_symbolic(REC->reason, { 0, "NOT_SPECIFIED" }, { 1, "NO_SOCKET" },...
 	char line[2048];
 	while (fgets(line, sizeof(line), fp))
 	{
@@ -104,11 +119,19 @@ void handle_lost_events(void *ctx, int cpu, __u64 lost_cnt)
 void handle_event(void *ctx, int cpu, void *data, __u32 data_sz)
 {
 	const struct event_t *e = data;
-	char saddr[INET6_ADDRSTRLEN], daddr[INET6_ADDRSTRLEN];
 
 	// Convert addresses to strings.
-	inet_ntop(e->family, &e->saddr, saddr, sizeof(saddr));
-	inet_ntop(e->family, &e->daddr, daddr, sizeof(daddr));
+	char saddr[INET6_ADDRSTRLEN], daddr[INET6_ADDRSTRLEN];
+	if (e->family == AF_INET)
+	{
+		inet_ntop(AF_INET, &e->saddr, saddr, sizeof(saddr));
+		inet_ntop(AF_INET, &e->daddr, daddr, sizeof(daddr));
+	}
+	else
+	{
+		inet_ntop(AF_INET6, &e->saddr6, saddr, sizeof(saddr));
+		inet_ntop(AF_INET6, &e->daddr6, daddr, sizeof(daddr));
+	}
 
 	// Get local time.
 	struct tm *tm;
@@ -118,7 +141,9 @@ void handle_event(void *ctx, int cpu, void *data, __u32 data_sz)
 	tm = localtime(&t);
 	strftime(ts, sizeof(ts), "%H:%M:%S", tm);
 
-	printf("%-16s %-16s %-8lld %12s:%-5d -> %12s:%-5d %-12s", ts, e->comm, e->pid, saddr, e->sport, daddr, e->dport, get_drop_reason(e->reason));
+	printf("%-16s %-16s %-8lld %15s:%-6d -> %15s:%-6d %-12s %-12s", ts, e->comm,
+		   e->pid, saddr, e->sport, daddr, e->dport, get_tcp_flags(e->tcp_flags),
+		   get_drop_reason(e->reason));
 	putchar('\n');
 }
 
@@ -178,7 +203,8 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 
-	pb = perf_buffer__new(bpf_map__fd(skel->maps.events), 64, handle_event, handle_lost_events, NULL, NULL);
+	pb = perf_buffer__new(bpf_map__fd(skel->maps.drop_watch_events), 64,
+						  handle_event, handle_lost_events, NULL, NULL);
 	err = libbpf_get_error(pb);
 	if (err)
 	{
@@ -188,7 +214,8 @@ int main(int argc, char **argv)
 	}
 
 	printf("Started to watch TCP drops!\n");
-	printf("%-16s %-16s %-8s %-17s -> %-17s %-12s\n", "TIME", "COMM", "PID", "SADDR:SPORT", "DADDR:DPORT", "REASON");
+	printf("%-16s %-16s %-8s %15s:%-6s -> %15s:%-6s %-12s %-12s\n", "TIME", "COMM",
+		   "PID", "SADDR", "SPORT", "DADDR", "DPORT", "TCP_FLAGS", "REASON");
 
 	/* main: poll perf events*/
 	while ((err = perf_buffer__poll(pb, 100)) >= 0)

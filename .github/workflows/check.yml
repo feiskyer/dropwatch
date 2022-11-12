@@ -18,5 +18,4 @@ jobs:
         curl -L https://git.io/misspell | bash
     - name: Spell Check
       run: |
-        find . -type f | grep -v vmlinux.h | xargs ./bin/misspell
-
+        find . -type f | grep -v vmlinux.h | grep -v libbpf | xargs ./bin/misspell

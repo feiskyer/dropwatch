@@ -11,6 +11,8 @@ To use BTF and CO-RE, `CONFIG_DEBUG_INFO_BTF=y` and `CONFIG_DEBUG_INFO_BTF_MODUL
 * RHEL 8.2+
 * Debian 11+
 
+For virtual machines running on public clouds, BTF may be enabled on earlier versions. E.g. BTF has already been enabled on Azure Ubuntu 18.04 VMs.
+
 And to build bpf applications, the following development tools should also be installed:
 
 ```sh
