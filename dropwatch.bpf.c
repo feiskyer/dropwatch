@@ -41,6 +41,7 @@ int trace_skb(struct trace_event_raw_kfree_skb *ctx)
         return 0;
     }
 
+    /* note: the following steps would not work for containers because sk is NULL */
     bpf_probe_read(&event.family, sizeof(event.family), &sk->__sk_common.skc_family);
     if (event.family != AF_INET && event.family != AF_INET6)
     {
