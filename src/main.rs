@@ -1,88 +1,49 @@
-use core::time::Duration;
 use anyhow::{bail, Result};
+use core::time::Duration;
 use libbpf_rs::PerfBufferBuilder;
 use plain::Plain;
-use std::ffi::CString;
-use time::OffsetDateTime;
-use time::macros::format_description;
+use std::fs::File;
+use std::io::Read;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use time::macros::format_description;
+use time::OffsetDateTime;
 
 mod bpf;
 use bpf::*;
 
 unsafe impl Plain for dropwatch_bss_types::event_t {}
 
-const DROP_REASONS: [&str; 66] = [
-    "SKB_NOT_DROPPED_YET",
-	"NOT_SPECIFIED",
-	"NO_SOCKET",
-	"PKT_TOO_SMALL",
-	"TCP_CSUM",
-	"SOCKET_FILTER",
-	"UDP_CSUM",
-	"NETFILTER_DROP",
-	"OTHERHOST",
-	"IP_CSUM",
-	"IP_INHDR",
-	"IP_RPFILTER",
-	"UNICAST_IN_L2_MULTICAST",
-	"XFRM_POLICY",
-	"IP_NOPROTO",
-	"SOCKET_RCVBUFF",
-	"PROTO_MEM",
-	"TCP_MD5NOTFOUND",
-	"TCP_MD5UNEXPECTED",
-	"TCP_MD5FAILURE",
-	"SOCKET_BACKLOG",
-	"TCP_FLAGS",
-	"TCP_ZEROWINDOW",
-	"TCP_OLD_DATA",
-	"TCP_OVERWINDOW",
-	"TCP_OFOMERGE",
-	"TCP_RFC7323_PAWS",
-	"TCP_INVALID_SEQUENCE",
-	"TCP_RESET",
-	"TCP_INVALID_SYN",
-	"TCP_CLOSE",
-	"TCP_FASTOPEN",
-	"TCP_OLD_ACK",
-	"TCP_TOO_OLD_ACK",
-	"TCP_ACK_UNSENT_DATA",
-	"TCP_OFO_QUEUE_PRUNE",
-	"TCP_OFO_DROP",
-	"IP_OUTNOROUTES",
-	"BPF_CGROUP_EGRESS",
-	"IPV6DISABLED",
-	"NEIGH_CREATEFAIL",
-	"NEIGH_FAILED",
-	"NEIGH_QUEUEFULL",
-	"NEIGH_DEAD",
-	"TC_EGRESS",
-	"QDISC_DROP",
-	"CPU_BACKLOG",
-	"XDP",
-	"TC_INGRESS",
-	"UNHANDLED_PROTO",
-	"SKB_CSUM",
-	"SKB_GSO_SEG",
-	"SKB_UCOPY_FAULT",
-	"DEV_HDR",
-	"DEV_READY",
-	"FULL_RING",
-	"NOMEM",
-	"HDR_TRUNC",
-	"TAP_FILTER",
-	"TAP_TXFILTER",
-	"ICMP_CSUM",
-	"INVALID_PROTO",
-	"IP_INADDRERRORS",
-	"IP_INNOROUTES",
-	"PKT_TOO_BIG",
-	"MAX",
-];
-
+// get tcp flags as a string
+fn get_tcp_flags(flags: u8) -> String {
+    let mut s = String::new();
+    if flags & 0x01 != 0 {
+        s.push('F'); // FIN
+    }
+    if flags & 0x02 != 0 {
+        s.push('S'); // SYN
+    }
+    if flags & 0x04 != 0 {
+        s.push('R'); // RST
+    }
+    if flags & 0x08 != 0 {
+        s.push('P'); // PSH
+    }
+    if flags & 0x10 != 0 {
+        s.push('A'); // ACK
+    }
+    if flags & 0x20 != 0 {
+        s.push('U'); // URG
+    }
+    if flags & 0x40 != 0 {
+        s.push('E'); // ECE
+    }
+    if flags & 0x80 != 0 {
+        s.push('C'); // CWR
+    }
+    s
+}
 
 fn bump_memlock_rlimit() -> Result<()> {
     let rlimit = libc::rlimit {
@@ -109,18 +70,34 @@ fn handle_event(_cpu: i32, data: &[u8]) {
         "00:00:00".to_string()
     };
 
-    let task = std::str::from_utf8(&event.comm).unwrap();
+    let mut drop_reasons: [&str; 128] = [""; 128];
+    let mut f = File::open("/sys/kernel/debug/tracing/events/skb/kfree_skb/format").unwrap();
+    let mut buf = String::new();
+    f.read_to_string(&mut buf).unwrap();
 
+    let mut lines = buf.lines().skip_while(|l| !l.contains("__print_symbolic"));
+    while let Some(line) = lines.next() {
+        let mut tuple_list = line.split('{').skip(1);
+        while let Some(tuple) = tuple_list.next() {
+            let mut tuple = tuple.split(',');
+            let reason = tuple.next().unwrap().trim().parse::<usize>().unwrap();
+            let desc = tuple.next().unwrap().trim().trim_end_matches("}").trim();
+            drop_reasons[reason] = desc;
+        }
+    }
+
+    let task = std::str::from_utf8(&event.comm).unwrap();
     println!(
-        "{:8} {:<16} {:<8} {}:{}->{}:{} {:<16}",
+        "{:8} {:<16} {:<8} {:>13}:{:<5}->{:>13}:{:<5} {:<8} {:<16}",
         now,
         task.trim_end_matches(char::from(0)),
         event.pid,
         Ipv4Addr::from(event.saddr),
-        event.sport.to_be(),
+        event.sport,
         Ipv4Addr::from(event.daddr),
-        event.dport.to_be(),
-        DROP_REASONS[event.reason as usize],
+        event.dport,
+        get_tcp_flags(event.tcp_flags),
+        drop_reasons[event.reason as usize],
     );
 }
 
@@ -131,24 +108,22 @@ fn handle_lost_events(cpu: i32, count: u64) {
 fn main() -> Result<()> {
     bump_memlock_rlimit()?;
 
-    let mut builder = DropwatchSkelBuilder::default();
-	let btf_custom_path = "/dropwatch.btf";
-	let _path = CString::new(btf_custom_path).unwrap();
-	let btf_custom_path_fd = _path.as_ptr();
-	let mut open_opts = builder.obj_builder.opts(std::ptr::null());
-	open_opts.btf_custom_path = btf_custom_path_fd;
-    let open = builder.open_opts(open_opts)?;
+    let builder = DropwatchSkelBuilder::default();
+    let open = builder.open()?;
     let mut skel = open.load()?;
 
-	// skel.progs_mut().tracepoint__skb__kfree_skb().attach_tracepoint("skb", "kfree_skb")?;
-	skel.attach()?;
+    // skel.progs_mut().tracepoint__skb__kfree_skb().attach_tracepoint("skb", "kfree_skb")?;
+    skel.attach()?;
 
-    let perf = PerfBufferBuilder::new(skel.maps_mut().events())
+    let perf = PerfBufferBuilder::new(&skel.maps_mut().drop_watch_events())
         .sample_cb(handle_event)
         .lost_cb(handle_lost_events)
         .build()?;
 
-    println!("{:8} {:<16} {:<8} {}->{} {:<16}", "TIME", "COMM", "PID", "SADDR:PORT", "DADDR:PORT", "REASON");
+    println!(
+        "{:8} {:<16} {:<8} {:<40} {:<8} {:<16}",
+        "TIME", "COMM", "PID", "SADDR:PORT->DADDR:PORT", "TCP_FLAGS", "REASON"
+    );
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();

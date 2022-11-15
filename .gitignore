@@ -22,6 +22,7 @@
 *.la
 *.lo
 out
+libbpf
 
 # Shared objects (inc. Windows DLLs)
 *.dll
