@@ -13,7 +13,13 @@ use time::OffsetDateTime;
 mod bpf;
 use bpf::*;
 
+#[macro_use]
+extern crate lazy_static;
+
 unsafe impl Plain for dropwatch_bss_types::event_t {}
+lazy_static! {
+    static ref DROP_REASONS: [String; 128] = get_drop_reasons();
+}
 
 // get tcp flags as a string
 fn get_tcp_flags(flags: u8) -> String {
@@ -70,25 +76,9 @@ fn handle_event(_cpu: i32, data: &[u8]) {
         "00:00:00".to_string()
     };
 
-    let mut drop_reasons: [&str; 128] = [""; 128];
-    let mut f = File::open("/sys/kernel/debug/tracing/events/skb/kfree_skb/format").unwrap();
-    let mut buf = String::new();
-    f.read_to_string(&mut buf).unwrap();
-
-    let mut lines = buf.lines().skip_while(|l| !l.contains("__print_symbolic"));
-    while let Some(line) = lines.next() {
-        let mut tuple_list = line.split('{').skip(1);
-        while let Some(tuple) = tuple_list.next() {
-            let mut tuple = tuple.split(',');
-            let reason = tuple.next().unwrap().trim().parse::<usize>().unwrap();
-            let desc = tuple.next().unwrap().trim().trim_end_matches("}").trim();
-            drop_reasons[reason] = desc;
-        }
-    }
-
     let task = std::str::from_utf8(&event.comm).unwrap();
     println!(
-        "{:8} {:<16} {:<8} {:>13}:{:<5}->{:>13}:{:<5} {:<8} {:<16}",
+        "{:8} {:<16} {:<8} {:>13}:{:<5}->{:>13}:{:<5} {:<10} {:<16}",
         now,
         task.trim_end_matches(char::from(0)),
         event.pid,
@@ -97,8 +87,30 @@ fn handle_event(_cpu: i32, data: &[u8]) {
         Ipv4Addr::from(event.daddr),
         event.dport,
         get_tcp_flags(event.tcp_flags),
-        drop_reasons[event.reason as usize],
+        DROP_REASONS[event.reason as usize].as_str(),
     );
+}
+
+fn get_drop_reasons() -> [String; 128] {
+    let mut drop_reasons: [String; 128] = vec!["".to_string(); 128]
+        .into_iter()
+        .collect::<Vec<String>>()
+        .try_into()
+        .unwrap();
+    let mut f = File::open("/sys/kernel/debug/tracing/events/skb/kfree_skb/format").unwrap();
+    let mut buf = String::new();
+    f.read_to_string(&mut buf).unwrap();
+    let mut lines = buf.lines().skip_while(|l| !l.contains("__print_symbolic"));
+    while let Some(line) = lines.next() {
+        let mut tuple_list = line.split('{').skip(1);
+        while let Some(tuple) = tuple_list.next() {
+            let mut tuple = tuple.split(',');
+            let reason = tuple.next().unwrap().trim().parse::<usize>().unwrap();
+            let desc = tuple.next().unwrap().trim().trim_end_matches("}").trim().trim_matches('"');
+            drop_reasons[reason] = desc.to_string();
+        }
+    }
+    drop_reasons
 }
 
 fn handle_lost_events(cpu: i32, count: u64) {
@@ -121,7 +133,7 @@ fn main() -> Result<()> {
         .build()?;
 
     println!(
-        "{:8} {:<16} {:<8} {:<40} {:<8} {:<16}",
+        "{:8} {:<16} {:<8} {:<40} {:<10} {:<16}",
         "TIME", "COMM", "PID", "SADDR:PORT->DADDR:PORT", "TCP_FLAGS", "REASON"
     );
 

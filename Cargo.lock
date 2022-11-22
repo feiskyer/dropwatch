@@ -125,6 +125,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ctrlc",
+ "lazy_static",
  "libbpf-cargo",
  "libbpf-rs",
  "libc",
