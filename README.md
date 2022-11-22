@@ -3,7 +3,7 @@
 ## Prerequisites
 
 ```sh
-cargo install libbpf-cargo
+cargo install --version=0.12.0 libbpf-cargo
 ```
 
 ## Build
